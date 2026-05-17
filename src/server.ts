@@ -23,12 +23,25 @@ export function createServer(config: FreeMuxConfig): Server {
   });
 }
 
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-headers": "Content-Type, Authorization"
+};
+
 async function routeRequest(
   request: IncomingMessage,
   response: ServerResponse,
   config: FreeMuxConfig,
   router: FreeMuxRouter
 ): Promise<void> {
+  // Handle CORS preflight
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, CORS_HEADERS);
+    response.end();
+    return;
+  }
+
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   if (request.method === "GET" && url.pathname === "/health") {
@@ -36,7 +49,7 @@ async function routeRequest(
     return;
   }
 
-  if (request.method === "GET" && url.pathname === "/v1/models") {
+  if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/v1/models") {
     writeJson(response, 200, {
       object: "list",
       data: [
@@ -101,7 +114,7 @@ function validateChatCompletionRequest(body: unknown): ChatCompletionRequest {
 }
 
 function writeJson(response: ServerResponse, status: number, body: unknown): void {
-  response.writeHead(status, { "content-type": "application/json" });
+  response.writeHead(status, { "content-type": "application/json", ...CORS_HEADERS });
   response.end(JSON.stringify(body));
 }
 
@@ -112,25 +125,25 @@ function writeError(response: ServerResponse, error: unknown): void {
   }
 
   if (error instanceof LocalRequestError) {
-    response.writeHead(error.status, { "content-type": "application/json" });
+    response.writeHead(error.status, { "content-type": "application/json", ...CORS_HEADERS });
     response.end(openAiError(error.status, error.code, error.message));
     return;
   }
 
   if (error instanceof UpstreamHttpError) {
     const status = error.status === 401 || error.status === 403 ? error.status : 502;
-    response.writeHead(status, { "content-type": "application/json" });
+    response.writeHead(status, { "content-type": "application/json", ...CORS_HEADERS });
     response.end(openAiError(status, "upstream_error", error.body || error.message));
     return;
   }
 
   if (error instanceof UpstreamNetworkError) {
-    response.writeHead(502, { "content-type": "application/json" });
+    response.writeHead(502, { "content-type": "application/json", ...CORS_HEADERS });
     response.end(openAiError(502, "upstream_network_error", error.message));
     return;
   }
 
   const message = error instanceof Error ? error.message : "Unknown server error";
-  response.writeHead(500, { "content-type": "application/json" });
+  response.writeHead(500, { "content-type": "application/json", ...CORS_HEADERS });
   response.end(openAiError(500, "internal_error", message));
 }
