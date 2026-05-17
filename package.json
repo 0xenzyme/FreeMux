@@ -1,0 +1,23 @@
+{
+  "name": "freemux",
+  "version": "0.1.0",
+  "description": "Stable OpenAI-compatible proxy alias for OpenRouter free models.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "freemux": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm build && node --test test/*.test.mjs",
+    "freemux": "pnpm build && node dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.8.0"
+  }
+}
