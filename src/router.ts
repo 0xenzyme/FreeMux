@@ -138,7 +138,7 @@ export function shouldFallback(error: unknown): boolean {
     return true;
   }
   if (error instanceof UpstreamHttpError) {
-    return error.status === 404 || error.status === 429 || error.status >= 500;
+    return error.status === 403 || error.status === 404 || error.status === 429 || error.status >= 500;
   }
   return false;
 }

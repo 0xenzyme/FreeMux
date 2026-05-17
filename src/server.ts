@@ -15,19 +15,22 @@ export function createServer(config: FreeMuxConfig): Server {
   const router = new FreeMuxRouter(config, catalog, client);
 
   return createHttpServer(async (request, response) => {
+    console.log(`[${new Date().toISOString()}] ${request.method} ${request.url} origin=${request.headers.origin || "-"}`);
     try {
       await routeRequest(request, response, config, router);
     } catch (error) {
-      writeError(response, error);
+      writeError(response, error, request.headers.origin);
     }
   });
 }
 
-const CORS_HEADERS = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "Content-Type, Authorization"
-};
+function corsHeaders(origin?: string, requestedHeaders?: string): Record<string, string> {
+  return {
+    "access-control-allow-origin": origin || "*",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": requestedHeaders || "Content-Type, Authorization"
+  };
+}
 
 async function routeRequest(
   request: IncomingMessage,
@@ -35,9 +38,11 @@ async function routeRequest(
   config: FreeMuxConfig,
   router: FreeMuxRouter
 ): Promise<void> {
-  // Handle CORS preflight
+  const origin = request.headers.origin;
+
   if (request.method === "OPTIONS") {
-    response.writeHead(204, CORS_HEADERS);
+    const requestedHeaders = request.headers["access-control-request-headers"];
+    response.writeHead(204, corsHeaders(origin, requestedHeaders));
     response.end();
     return;
   }
@@ -45,22 +50,15 @@ async function routeRequest(
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   if (request.method === "GET" && url.pathname === "/health") {
-    writeJson(response, 200, { status: "ok", name: "freemux" });
+    writeJson(response, 200, { status: "ok", name: "freemux" }, origin);
     return;
   }
 
   if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/v1/models") {
     writeJson(response, 200, {
       object: "list",
-      data: [
-        {
-          id: config.modelAlias,
-          object: "model",
-          created: 0,
-          owned_by: "freemux"
-        }
-      ]
-    });
+      data: [{ id: config.modelAlias, object: "model", created: 0, owned_by: "freemux" }]
+    }, origin);
     return;
   }
 
@@ -74,7 +72,8 @@ async function routeRequest(
     const result = await router.complete(chatRequest);
     response.writeHead(result.status, {
       "content-type": result.contentType,
-      "x-freemux-upstream-model": result.upstreamModel
+      "x-freemux-upstream-model": result.upstreamModel,
+      ...corsHeaders(origin)
     });
     response.end(result.body);
     return;
@@ -113,37 +112,37 @@ function validateChatCompletionRequest(body: unknown): ChatCompletionRequest {
   return candidate as ChatCompletionRequest;
 }
 
-function writeJson(response: ServerResponse, status: number, body: unknown): void {
-  response.writeHead(status, { "content-type": "application/json", ...CORS_HEADERS });
+function writeJson(response: ServerResponse, status: number, body: unknown, origin?: string): void {
+  response.writeHead(status, { "content-type": "application/json", ...corsHeaders(origin) });
   response.end(JSON.stringify(body));
 }
 
-function writeError(response: ServerResponse, error: unknown): void {
+function writeError(response: ServerResponse, error: unknown, origin?: string): void {
   if (response.headersSent) {
     response.end();
     return;
   }
 
   if (error instanceof LocalRequestError) {
-    response.writeHead(error.status, { "content-type": "application/json", ...CORS_HEADERS });
+    response.writeHead(error.status, { "content-type": "application/json", ...corsHeaders(origin) });
     response.end(openAiError(error.status, error.code, error.message));
     return;
   }
 
   if (error instanceof UpstreamHttpError) {
-    const status = error.status === 401 || error.status === 403 ? error.status : 502;
-    response.writeHead(status, { "content-type": "application/json", ...CORS_HEADERS });
+    const status = error.status === 401 ? error.status : 502;
+    response.writeHead(status, { "content-type": "application/json", ...corsHeaders(origin) });
     response.end(openAiError(status, "upstream_error", error.body || error.message));
     return;
   }
 
   if (error instanceof UpstreamNetworkError) {
-    response.writeHead(502, { "content-type": "application/json", ...CORS_HEADERS });
+    response.writeHead(502, { "content-type": "application/json", ...corsHeaders(origin) });
     response.end(openAiError(502, "upstream_network_error", error.message));
     return;
   }
 
   const message = error instanceof Error ? error.message : "Unknown server error";
-  response.writeHead(500, { "content-type": "application/json", ...CORS_HEADERS });
+  response.writeHead(500, { "content-type": "application/json", ...corsHeaders(origin) });
   response.end(openAiError(500, "internal_error", message));
 }
